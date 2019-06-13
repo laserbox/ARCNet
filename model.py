@@ -45,73 +45,6 @@ class AlexNet(nn.Module):
 		# x = self.classifier(x)
 		return x
 
-# class Attention(nn.Module):
-# 	"""docstring for ClassName"""
-# 	def __init__(self, input_size, mask_size, hidden_size, num_layers, batch_size):
-# 		super(Attention, self).__init__()
-# 		self.input_size = input_size
-# 		self.hidden_size = hidden_size
-# 		self.num_layers = num_layers
-# 		self.batch_size = batch_size
-# 		self.mask_size = mask_size
-# 		self.atten = nn.Linear(self.hidden_size, self.mask_size, bias=False)
-# 		self.mask = self.mask_init()
-# 	def forward(self, hidden):
-# 		#input = input.view(self.batch_size,self.input_size,-1)
-# 		hidden = hidden[self.num_layers-1]
-# 		self.mask = self.atten(hidden)
-# 		self.mask = nn.functional.softmax(mask)
-# 		#masked_output = (mask.unsqueeze(1)*input).sum(2)
-
-# 		return self.mask
-# 	def mask_init(self)
-# 		m0 = Variable(torch.ones(self.batch_size,self.mask_size) / self.mask_size)
-# 		return m0.cuda()
-
-# class Lstm(nn.Module):
-# 	"""docstring for ClassName"""
-# 	def __init__(self, input_size, mask_size, hidden_size, num_layers, num_recurrence, num_classes, batch_size):
-# 		super(Lstm, self).__init__()
-# 		self.input_size = input_size
-# 		self.hidden_size = hidden_size
-# 		self.num_layers = num_layers
-# 		self.num_recurrence = num_recurrence
-# 		self.batch_size = batch_size
-# 		self.mask_size = mask_size
-# 		self.num_classes = num_classes
-# 		self.lstm = nn.LSTM(self.input_size, self.hidden_size, self.num_layers, batch_first=True)
-# 		self.atten_mask = Variable(torch.zeros(self.num_recurrence, self.batch_size, 36))
-# 		self.atten = Attention(self.input_size, self.mask_size, self.hidden_size, self.num_layers, self.batch_size)
-# 		self.fc = nn.Linear(self.hidden_size, self.num_classes, bias=False)
-# 		self.hidden, self.cell = self.hidden_init()
-# 		self.tanh = nn.Tanh()
-# 	def forward(self, input, hidden, cell):
-# 		#lstm_in, _ = self.atten(input, self.hidden)
-# 		lstm_in = lstm_in.unsqueeze(1)
-# 		output, (self.hidden, self.cell) = self.lstm(lstm_in, (self.hidden, self.cell))
-# 		output = self.tanh(output)
-# 		output = self.fc(output)
-# 		output = nn.functional.softmax(output)
-# 		return output, hidden, cell
-# 	# def forward(self, input):
-# 	# 	for i in range(self.num_recurrence):
-# 	# 		lstm_in, self.atten_mask[i-1] = self.atten(input, self.hidden)
-# 	# 		lstm_in = lstm_in.unsqueeze(1)
-# 	# 		output, (self.hidden, self.cell) = self.lstm(lstm_in, (self.hidden, self.cell))
-# 	# 	output = self.tanh(output)
-# 	# 	output = self.fc(output)
-# 	# 	output = nn.functional.softmax(output)
-# 	# 	return output
-# 	def hidden_init(self, use_cuda=True):
-# 		h0 = Variable(torch.zeros(self.num_layers,self.batch_size,self.hidden_size))
-# 		c0 = Variable(torch.zeros(self.num_layers,self.batch_size,self.hidden_size))
-		
-# 		if use_cuda:
-# 			return h0.cuda(), c0.cuda()
-# 		else:
-# 			return h0, c0
-
-
 class ALSTM(nn.Module):
 	"""docstring for ClassName"""
 	def __init__(self, input_size, mask_size, hidden_size, num_layers, num_recurrence, num_classes, batch_size):
@@ -143,15 +76,6 @@ class ALSTM(nn.Module):
 		self.mask = self.atten(self.hidden[self.num_layers-1])
 		self.mask = nn.functional.softmax(self.mask)
 		return output
-	# def forward(self, input):
-	# 	for i in range(self.num_recurrence):
-	# 		lstm_in, self.atten_mask[i-1] = self.atten(input, self.hidden)
-	# 		lstm_in = lstm_in.unsqueeze(1)
-	# 		output, (self.hidden, self.cell) = self.lstm(lstm_in, (self.hidden, self.cell))
-	# 	output = self.tanh(output)
-	# 	output = self.fc(output)
-	# 	output = nn.functional.softmax(output)
-	# 	return output
 	def hidden_init(self, use_cuda=True):
 		h0 = Variable(torch.zeros(self.num_layers,self.batch_size,self.hidden_size))
 		c0 = Variable(torch.zeros(self.num_layers,self.batch_size,self.hidden_size))
@@ -185,8 +109,6 @@ def train_model(cnn_model, lstm_model, criterion, optimizer,
 	}
 	if DATASET == 'ucm-80%':
 		data_dir ='/home/aaron/Desktop/scene_dataset/UCMerced_LandUse/80%'
-		# data_dir = '/home/aaron/Desktop/my_attention/dataset'
-		# data_dir = '/home/aaron/Desktop/scene_dataset/UCMerced_LandUse/uc_cross_val_1'
 		num_classes=21
 	elif DATASET == 'ucm-50%':
 		data_dir = '/home/aaron/Desktop/scene_dataset/UCMerced_LandUse/50%'
@@ -455,7 +377,7 @@ def plot_confusion_matrix(y_true, y_pred, labels):
 	plt.figure(figsize=(10, 8), dpi=120)
 	ind_array = np.arange(len(labels))
 	x, y = np.meshgrid(ind_array, ind_array)
-	intFlag = 0 # 标记在图片中对文字是整数型还是浮点型
+	intFlag = 0 
 	for x_val, y_val in zip(x.flatten(), y.flatten()):
 		#
 
@@ -466,7 +388,6 @@ def plot_confusion_matrix(y_true, y_pred, labels):
 		else:
 			c = cm_normalized[y_val][x_val]
 			if (c > 0.01):
-				#这里是绘制数字，可以对数字大小和颜色进行修改
 				plt.text(x_val, y_val, "%0.2f" % (c,), color='red', fontsize=7, va='center', ha='center')
 			else:
 				plt.text(x_val, y_val, "%d" % (0,), color='red', fontsize=7, va='center', ha='center')
