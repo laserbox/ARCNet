@@ -52,7 +52,7 @@ if __name__ == '__main__':
 		num_layers=3
 		num_recurrence=20
 		cnn_model = model.AlexNet()
-		cnn_model.load_state_dict(torch.load('alexnet-2.pth'))
+		cnn_model.load_state_dict(torch.load('alexnet.pth'))
 		for param in cnn_model.parameters():
 				param.requires_grad = False
 	elif CNN == 'vgg':
@@ -63,7 +63,7 @@ if __name__ == '__main__':
 		num_layers=3
 		num_recurrence=20		
 		cnn_model = vgg.vgg16(pretrained=False)
-		cnn_model.load_state_dict(torch.load('vgg-aid-20%.pth'))
+		cnn_model.load_state_dict(torch.load('vgg.pth'))
 		for param in cnn_model.parameters():
 				param.requires_grad = False
 	elif CNN == 'google':
@@ -74,7 +74,7 @@ if __name__ == '__main__':
 		num_layers=3
 		num_recurrence=30	
 		cnn_model = model.AlexNet()
-		cnn_model.load_state_dict(torch.load('alexnet-2.pth'))
+		cnn_model.load_state_dict(torch.load('alexnet.pth'))
 		for param in cnn_model.parameters():
 				param.requires_grad = False
 	elif CNN == 'res':
@@ -105,7 +105,6 @@ if __name__ == '__main__':
 
 
 	lstm_model = model.ALSTM(input_size, mask_size, hidden_size, num_layers, num_recurrence, num_classes, batch_size)
-	# lstm_model.load_state_dict(torch.load('/home/aaron/Desktop/my_attention/save_model/vgg/temp.pth'))
 	lstm_params = list(filter(lambda p:p.requires_grad,lstm_model.parameters()))
 	optimizer_ft = optim.Adam(lstm_params, weight_decay=5e-4, lr=LR)
 	exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=50, gamma=0.1)
