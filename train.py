@@ -1,146 +1,411 @@
-from __future__ import print_function, division
+import os
+import argparse
+from datetime import datetime
+
+import numpy as np
+from tqdm import tqdm
+import pandas as pd
+import joblib
+
+from sklearn.model_selection import StratifiedKFold
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
-from torch.autograd import Variable
-import numpy as np
-import torchvision
-from torchvision import datasets, models, transforms
-import time
-import os
-import model
-import pdb
-import vgg
-import resnet
+import torch.backends.cudnn as cudnn
+from torchvision import transforms
+
+from lib.dataset import Dataset
+from lib.utils import AverageMeter, str2bool, RandomErase
+from lib.metrics import compute_accuracy
+from lib.losses import FocalLoss
+from lib.optimizers import RAdam
+from lib.datapath import img_path_generator
+from lib.models.ra import RA
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--name', default=None,
+                        help='model name: (default: arch+timestamp)')
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet34',
+                        help='model architecture: ' + ' (default: resnet34)')
+    parser.add_argument('--freeze_bn', default=True, type=str2bool)
+    parser.add_argument('--dropout_p', default=0, type=float)
+    parser.add_argument('--loss', default='CrossEntropyLoss',
+                        choices=['CrossEntropyLoss', 'FocalLoss', 'MSELoss'])
+    parser.add_argument('--reg_coef', default=1.0, type=float)
+    parser.add_argument('--cls_coef', default=0.1, type=float)
+    parser.add_argument('--epochs', default=30, type=int,
+                        metavar='N', help='number of total epochs to run')
+    parser.add_argument('-b', '--batch_size', default=32, type=int,
+                        metavar='N', help='mini-batch size (default: 32)')
+    parser.add_argument('--img_size', default=288, type=int,
+                        help='input image size (default: 288)')
+    parser.add_argument('--input_size', default=256, type=int,
+                        help='input image size (default: 256)')
+    parser.add_argument('--optimizer', default='SGD')
+    parser.add_argument('--pred_type', default='classification',
+                        choices=['classification', 'regression'])
+    parser.add_argument('--scheduler', default='CosineAnnealingLR',
+                        choices=['CosineAnnealingLR', 'ReduceLROnPlateau'])
+    parser.add_argument('--lr', '--learning-rate', default=1e-3,
+                        type=float, metavar='LR', help='initial learning rate')
+    parser.add_argument('--min_lr', default=1e-5,
+                        type=float, help='minimum learning rate')
+    parser.add_argument('--factor', default=0.5, type=float)
+    parser.add_argument('--patience', default=5, type=int)
+    parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
+    parser.add_argument('--weight-decay', default=1e-4,
+                        type=float, help='weight decay')
+    parser.add_argument('--nesterov', default=False,
+                        type=str2bool, help='nesterov')
+    parser.add_argument('--gpus', default='0', type=str)
+
+    # preprocessing
+    parser.add_argument('--scale_radius', default=True, type=str2bool)
+    parser.add_argument('--normalize', default=False, type=str2bool)
+    parser.add_argument('--padding', default=False, type=str2bool)
+    parser.add_argument('--remove', default=False, type=str2bool)
+
+    # data augmentation
+    parser.add_argument('--rotate', default=True, type=str2bool)
+    parser.add_argument('--rotate_min', default=-180, type=int)
+    parser.add_argument('--rotate_max', default=180, type=int)
+    parser.add_argument('--rescale', default=True, type=str2bool)
+    parser.add_argument('--rescale_min', default=0.8889, type=float)
+    parser.add_argument('--rescale_max', default=1.0, type=float)
+    parser.add_argument('--shear', default=True, type=str2bool)
+    parser.add_argument('--shear_min', default=-36, type=int)
+    parser.add_argument('--shear_max', default=36, type=int)
+    parser.add_argument('--translate', default=False, type=str2bool)
+    parser.add_argument('--translate_min', default=0, type=float)
+    parser.add_argument('--translate_max', default=0, type=float)
+    parser.add_argument('--flip', default=True, type=str2bool)
+    parser.add_argument('--contrast', default=True, type=str2bool)
+    parser.add_argument('--contrast_min', default=0.9, type=float)
+    parser.add_argument('--contrast_max', default=1.1, type=float)
+    parser.add_argument('--random_erase', default=False, type=str2bool)
+    parser.add_argument('--random_erase_prob', default=0.5, type=float)
+    parser.add_argument('--random_erase_sl', default=0.02, type=float)
+    parser.add_argument('--random_erase_sh', default=0.4, type=float)
+    parser.add_argument('--random_erase_r', default=0.3, type=float)
+
+    # dataset
+    parser.add_argument('--train_dataset', default='ucm',
+                        choices=['ucm', 'whu', 'opt', 'nwpu', 'aid'])
+    parser.add_argument('--cv', default=True, type=str2bool)
+    parser.add_argument('--n_splits', default=5, type=int)
+    parser.add_argument('--remove_duplicate', default=False, type=str2bool)
+    parser.add_argument('--class_aware', default=False, type=str2bool)
+
+    parser.add_argument('--pretrained_model')
+
+    args = parser.parse_args()
+
+    return args
+
+
+def train(args, train_loader, model, criterion, optimizer, epoch):
+    losses = AverageMeter()
+    ac_scores = AverageMeter()
+
+    model.train()
+
+    for i, (input, target) in tqdm(enumerate(train_loader), total=len(train_loader)):
+        input = input.cuda()
+        target = target.cuda()
+
+        output = model(input)
+        if args.pred_type == 'classification':
+            loss = criterion(output, target)
+        elif args.pred_type == 'regression':
+            loss = criterion(output.view(-1), target.float())
+        elif args.pred_type == 'multitask':
+            loss = args.reg_coef * criterion['regression'](output[:, 0], target.float()) + \
+                args.cls_coef * \
+                criterion['classification'](output[:, 1:], target)
+            output = output[:, 0].unsqueeze(1)
+
+        # compute gradient and do optimizing step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        ac_score = compute_accuracy(output, target)
+
+        losses.update(loss.item(), input.size(0))
+        ac_scores.update(ac_score, input.size(0))
+
+    return losses.avg, ac_scores.avg
+
+
+def validate(args, val_loader, model, criterion):
+    losses = AverageMeter()
+    ac_scores = AverageMeter()
+
+    # switch to evaluate mode
+    model.eval()
+
+    with torch.no_grad():
+        for i, (input, target) in tqdm(enumerate(val_loader), total=len(val_loader)):
+            input = input.cuda()
+            target = target.cuda()
+
+            output = model(input)
+
+            if args.pred_type == 'classification':
+                loss = criterion(output, target)
+            elif args.pred_type == 'regression':
+                loss = criterion(output.view(-1), target.float())
+            elif args.pred_type == 'multitask':
+                loss = args.reg_coef * criterion['regression'](output[:, 0], target.float()) + \
+                    args.cls_coef * \
+                    criterion['classification'](output[:, 1:], target)
+                output = output[:, 0].unsqueeze(1)
+
+            ac_score = compute_accuracy(output, target)
+
+            losses.update(loss.item(), input.size(0))
+            ac_scores.update(ac_score, input.size(0))
+
+    return losses.avg, ac_scores.avg
+
+
+def main():
+    args = parse_args()
+
+    if args.name is None:
+        args.name = '%s_%s' % (args.arch, datetime.now().strftime('%m%d%H%M'))
+
+    if not os.path.exists('models/%s' % args.name):
+        os.makedirs('models/%s' % args.name)
+
+    print('Config -----')
+    for arg in vars(args):
+        print('- %s: %s' % (arg, getattr(args, arg)))
+    print('------------')
+
+    with open('models/%s/args.txt' % args.name, 'w') as f:
+        for arg in vars(args):
+            print('- %s: %s' % (arg, getattr(args, arg)), file=f)
+
+    joblib.dump(args, 'models/%s/args.pkl' % args.name)
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+
+    if args.loss == 'CrossEntropyLoss':
+        criterion = nn.CrossEntropyLoss().cuda()
+    elif args.loss == 'FocalLoss':
+        criterion = FocalLoss().cuda()
+    elif args.loss == 'MSELoss':
+        criterion = nn.MSELoss().cuda()
+
+    else:
+        raise NotImplementedError
+
+    # switch to benchmark model, a little forward results fluctuation, a little fast training
+    # cudnn.benchmark = True
+    # switch to deterministic model, more stable
+    cudnn.deterministic = True
+
+    model = RA(cnn_model_name=args.arch)
+
+    train_transform = []
+    train_transform = transforms.Compose([
+        transforms.Resize((args.img_size, args.img_size)),
+        transforms.RandomAffine(
+            degrees=(args.rotate_min, args.rotate_max) if args.rotate else 0,
+            translate=(args.translate_min,
+                       args.translate_max) if args.translate else None,
+            scale=(args.rescale_min, args.rescale_max) if args.rescale else None,
+            shear=(args.shear_min, args.shear_max) if args.shear else None,
+        ),
+        transforms.CenterCrop(args.input_size),
+        transforms.RandomHorizontalFlip(p=0.5 if args.flip else 0),
+        transforms.RandomVerticalFlip(p=0.5 if args.flip else 0),
+        transforms.ColorJitter(
+            brightness=0,
+            contrast=args.contrast,
+            saturation=0,
+            hue=0),
+        RandomErase(
+            prob=args.random_erase_prob if args.random_erase else 0,
+            sl=args.random_erase_sl,
+            sh=args.random_erase_sh,
+            r=args.random_erase_r),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+
+    val_transform = transforms.Compose([
+        # transforms.Resize((args.img_size, args.input_size)),
+        transforms.Resize((args.input_size, args.input_size)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+
+    ucm_img_path, ucm_labels, num_outputs = img_path_generator(dataset=args.train_dataset)
+    if args.pred_type == 'regression':
+        num_outputs = 1
+    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=41)
+    img_paths = []
+    labels = []
+    for fold, (train_idx, val_idx) in enumerate(skf.split(ucm_img_path, ucm_labels)):
+        img_paths.append((ucm_img_path[train_idx], ucm_img_path[val_idx]))
+        labels.append((ucm_labels[train_idx], ucm_labels[val_idx]))
+
+    folds = []
+    best_losses = []
+    best_ac_scores = []
+    best_epochs = []
+
+    for fold, ((train_img_paths, val_img_paths), (train_labels, val_labels)) in enumerate(zip(img_paths, labels)):
+        print('Fold [%d/%d]' % (fold+1, len(img_paths)))
+
+        if os.path.exists('models/%s/model_%d.pth' % (args.name, fold+1)):
+            log = pd.read_csv('models/%s/log_%d.csv' % (args.name, fold+1))
+            best_loss, best_ac_score = log.loc[log['val_loss'].values.argmin(
+            ), ['val_loss', 'val_score', 'val_ac_score']].values
+            folds.append(str(fold + 1))
+            best_losses.append(best_loss)
+            best_ac_scores.append(best_ac_score)
+            continue
+
+        # train
+        train_set = Dataset(
+            train_img_paths,
+            train_labels,
+            transform=train_transform)
+
+        train_loader = torch.utils.data.DataLoader(
+            train_set,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=4,
+            sampler=None)
+
+        val_set = Dataset(
+            val_img_paths,
+            val_labels,
+            transform=val_transform)
+        val_loader = torch.utils.data.DataLoader(
+            val_set,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=4)
+
+        # create model
+        model = RA(cnn_model_name=args.arch)
+
+        device = torch.device('cuda')
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)
+        model.to(device)
+        # model = model.cuda()
+        if args.pretrained_model is not None:
+            model.load_state_dict(torch.load(
+                'models/%s/model_%d.pth' % (args.pretrained_model, fold+1)))
+
+        # print(model)
+
+        if args.optimizer == 'Adam':
+            optimizer = optim.Adam(
+                filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+        elif args.optimizer == 'AdamW':
+            optimizer = optim.AdamW(
+                filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+        elif args.optimizer == 'RAdam':
+            optimizer = RAdam(
+                filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+        elif args.optimizer == 'SGD':
+            # optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr,
+            #                       momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
+            optimizer = optim.SGD(model.get_config_optim(args.lr, args.lr, args.lr), lr=args.lr,
+                                  momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
+
+        if args.scheduler == 'CosineAnnealingLR':
+            scheduler = lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=args.epochs, eta_min=args.min_lr)
+        elif args.scheduler == 'ReduceLROnPlateau':
+            scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=args.factor, patience=args.patience,
+                                                       verbose=1, min_lr=args.min_lr)
+
+        log = pd.DataFrame(index=[], columns=[
+            'epoch', 'loss', 'ac_score', 'val_loss', 'val_ac_score',
+        ])
+        log = {
+            'epoch': [],
+            'loss': [],
+            'ac_score': [],
+            'val_loss': [],
+            'val_ac_score': [],
+        }
+
+        best_loss = float('inf')
+        best_ac_score = 0
+        best_epoch = 0
+
+        for epoch in range(args.epochs):
+            print('Epoch [%d/%d]' % (epoch + 1, args.epochs))
+
+            # train for one epoch
+            train_loss, train_ac_score = train(
+                args, train_loader, model, criterion, optimizer, epoch)
+
+            # evaluate on validation set
+            val_loss, val_ac_score = validate(
+                args, val_loader, model, criterion)
+
+            if args.scheduler == 'CosineAnnealingLR':
+                scheduler.step()
+            elif args.scheduler == 'ReduceLROnPlateau':
+                scheduler.step(val_loss)
+
+            print('loss %.4f - ac_score %.4f - val_loss %.4f - val_ac_score %.4f'
+                  % (train_loss, train_ac_score, val_loss, val_ac_score))
+
+            log['epoch'].append(epoch)
+            log['loss'].append(train_loss)
+            log['ac_score'].append(train_ac_score)
+            log['val_loss'].append(val_loss)
+            log['val_ac_score'].append(val_ac_score)
+
+            pd.DataFrame(log).to_csv('models/%s/log_%d.csv' %
+                                     (args.name, fold+1), index=False)
+
+            if val_ac_score > best_ac_score:
+                torch.save(model.state_dict(), 'models/%s/model_%d.pth' %
+                           (args.name, fold+1))
+                best_loss = val_loss
+                best_ac_score = val_ac_score
+                best_epoch = epoch
+                print("=> saved best model")
+
+        print('val_loss:  %f' % best_loss)
+        print('val_ac_score: %f' % best_ac_score)
+
+        folds.append(str(fold + 1))
+        best_losses.append(best_loss)
+        best_ac_scores.append(best_ac_score)
+        best_epochs.append(best_epoch)
+
+        results = pd.DataFrame({
+            'fold': folds + ['mean'],
+            'best_loss': best_losses + [np.mean(best_losses)],
+            'best_ac_score': best_ac_scores + [np.mean(best_ac_scores)],
+            'best_epoch': best_epochs + [''],
+        })
+
+        print(results)
+
+        torch.cuda.empty_cache()
+
+        if not args.cv:
+            break
+
 
 if __name__ == '__main__':
-	CNN='vgg'
-	DATASET='aid-20%'	
-	num_epochs=120
-
-	if DATASET == 'ucm-80%':
-		num_classes=21
-		batch_size=60
-	elif DATASET == 'ucm-50%':
-		num_classes=21
-		batch_size=10
-	elif DATASET == 'rs-60%':
-		num_classes=19
-		batch_size=95
-	elif DATASET == 'rs-40%':
-		num_classes=19
-		batch_size=10
-	elif DATASET == 'my':
-		num_classes=31
-		batch_size=12
-	elif DATASET == 'nwpu':
-		num_classes=45
-		batch_size=30
-	elif DATASET == 'aid-50%':
-		num_classes=30
-		batch_size=50
-	elif DATASET == 'aid-20%':
-		num_classes=30
-		batch_size=50
-
-	if CNN == 'alex':
-		LR=0.0001
-		input_size=256
-		mask_size=36
-		hidden_size=256
-		num_layers=3
-		num_recurrence=20
-		cnn_model = model.AlexNet()
-		cnn_model.load_state_dict(torch.load('alexnet.pth'))
-		for param in cnn_model.parameters():
-				param.requires_grad = False
-	elif CNN == 'vgg':
-		LR=0.0001
-		input_size=512
-		mask_size=49
-		hidden_size=256
-		num_layers=3
-		num_recurrence=20		
-		cnn_model = vgg.vgg16(pretrained=False)
-		cnn_model.load_state_dict(torch.load('vgg.pth'))
-		for param in cnn_model.parameters():
-				param.requires_grad = False
-	elif CNN == 'google':
-		LR=0.0001
-		input_size=256
-		mask_size=36
-		hidden_size=256
-		num_layers=3
-		num_recurrence=30	
-		cnn_model = model.AlexNet()
-		cnn_model.load_state_dict(torch.load('alexnet.pth'))
-		for param in cnn_model.parameters():
-				param.requires_grad = False
-	elif CNN == 'res':
-		LR=0.0001
-		input_size=512
-		mask_size=49
-		hidden_size=256
-		num_layers=3
-		num_recurrence=20	
-		cnn_model = resnet.resnet34(pretrained=False)
-		cnn_model.load_state_dict(torch.load('resnet.pth'))		
-		for param in cnn_model.parameters():
-				param.requires_grad = False	
-
-
-	if CNN == 'alex':
-		save_model_path='save_model/alexnet/model-temp.pth'
-		f = open('save_model/alexnet/log.txt', 'w')		
-	elif CNN == 'vgg':
-		save_model_path='save_model/vgg/model-aid-20.pth'
-		f = open('save_model/vgg/log.txt', 'w')			
-	elif CNN == 'google':
-		save_model_path='save_model/google/model-temp.pth'
-		f = open('save_model/google/log.txt', 'w')			
-	elif CNN == 'res':
-		save_model_path='save_model/resnet/model-temp.pth'
-		f = open('save_model/resnet/log.txt', 'w')
-
-
-	lstm_model = model.ALSTM(input_size, mask_size, hidden_size, num_layers, num_recurrence, num_classes, batch_size)
-	lstm_params = list(filter(lambda p:p.requires_grad,lstm_model.parameters()))
-	optimizer_ft = optim.Adam(lstm_params, weight_decay=5e-4, lr=LR)
-	exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=50, gamma=0.1)
-	criterion = nn.CrossEntropyLoss()
-
-	lstm_model = model.train_model(cnn_model, lstm_model, criterion, optimizer_ft, exp_lr_scheduler, num_recurrence, num_epochs, batch_size, DATASET, save_model_path)
-
-	print('hidden_size: {:4f}'.format(hidden_size))
-	print('num_recurrence: {:4f}'.format(num_recurrence))
-	print('LR: {:4f}'.format(LR))
-	print('batch_size: {:4f}'.format(batch_size))
-	print(DATASET)
-	print(CNN)
-
-	# if CNN == 'alex':
-	# 	torch.save(lstm_model, 'save_model/alexnet/model-temp.pth')
-	# 	torch.save(lstm_model.state_dict(), 'save_model/alexnet/temp.pth')
-	# 	f = open('save_model/alexnet/log.txt', 'w')		
-	# elif CNN == 'vgg':
-	# 	torch.save(lstm_model, 'save_model/vgg/model-temp1.pth')
-	# 	torch.save(lstm_model.state_dict(), 'save_model/vgg/temp1.pth')
-	# 	f = open('save_model/vgg/log.txt', 'w')			
-	# elif CNN == 'google':
-	# 	torch.save(lstm_model, 'save_model/google/model-temp.pth')
-	# 	torch.save(lstm_model.state_dict(), 'save_model/google/temp.pth')
-	# 	f = open('save_model/google/log.txt', 'w')			
-	# elif CNN == 'res':
-	# 	torch.save(lstm_model, 'save_model/resnet/model-temp.pth')
-	# 	torch.save(lstm_model.state_dict(), 'save_model/resnet/temp.pth')
-	# 	f = open('save_model/resnet/log.txt', 'w')
-	f.write('num_layers: {:4f} \n'.format(num_layers))			
-	f.write('hidden_size: {:4f} \n'.format(hidden_size))
-	f.write('num_recurrence: {:4f} \n'.format(num_recurrence))
-	f.write('LR: {:4f} \n'.format(LR))
-	f.write('batch_size: {:4f} \n'.format(batch_size))
-	f.write(DATASET)
-	f.write('\n')
-	f.write(CNN)
-	f.close()						
+    main()
