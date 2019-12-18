@@ -14,12 +14,13 @@ def get_model(model_name='resnet18', num_outputs=None, pretrained=True,
               freeze_bn=False, dropout_p=0, **kwargs):
 
     if 'efficientnet' in model_name:
-        model = EfficientNet.from_pretrained(model_name, num_classes=num_outputs)
-    
+        model = EfficientNet.from_pretrained(
+            model_name, num_classes=num_outputs)
+
     elif 'mobilenet' in model_name:
         model = model = mobilenet_v2(pretrained=pretrained)
         in_features = model.classifier.in_features
-        model.classifier = nn.Linear(in_features, num_outputs) 
+        model.classifier = nn.Linear(in_features, num_outputs)
 
     elif 'densenet' in model_name:
         model = models.__dict__[model_name](num_classes=1000,

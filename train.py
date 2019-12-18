@@ -22,7 +22,7 @@ from lib.metrics import compute_accuracy
 from lib.losses import FocalLoss
 from lib.optimizers import RAdam
 from lib.datapath import img_path_generator
-from lib.models.ra import RA
+from lib.models.RA import RA
 from lib.models.model_factory import get_model
 
 
@@ -211,17 +211,20 @@ def main():
     # switch to deterministic model, more stable
     cudnn.deterministic = True
 
-    
-    img_path, img_labels, num_outputs = img_path_generator(dataset=args.train_dataset)
+    img_path, img_labels, num_outputs = img_path_generator(
+        dataset=args.train_dataset)
     if args.pred_type == 'regression':
         num_outputs = 1
-    
-    if args.is_baseline:
-        model = get_model(model_name=args.arch, num_outputs=num_outputs, freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
-    else:
-        model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256, layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
 
-    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=41)
+    if args.is_baseline:
+        model = get_model(model_name=args.arch, num_outputs=num_outputs,
+                          freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
+    else:
+        model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256,
+                   layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
+
+    skf = StratifiedKFold(n_splits=args.n_splits,
+                          shuffle=True, random_state=41)
     img_paths = []
     labels = []
     for fold, (train_idx, val_idx) in enumerate(skf.split(img_path, img_labels)):
@@ -305,9 +308,11 @@ def main():
 
         # create model
         if args.is_baseline:
-            model = get_model(model_name=args.arch, num_outputs=num_outputs, freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
+            model = get_model(model_name=args.arch, num_outputs=num_outputs,
+                              freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
         else:
-            model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256, layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
+            model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256,
+                       layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
 
         device = torch.device('cuda')
         if torch.cuda.device_count() > 1:
