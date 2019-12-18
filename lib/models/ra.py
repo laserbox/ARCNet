@@ -14,7 +14,7 @@ class RA(nn.Module):
         super(RA, self).__init__()
 
         self.cnn_model_name = cnn_model_name
-        self.cnn, feature_dim, reduction = get_cnn_model(
+        self.cnn, feature_dim, reduction = get_pretrained_cnn(
             cnn_model_name, class_num, pretrain)
         for p in self.cnn.parameters():
             p.requires_grad = False
@@ -79,7 +79,7 @@ class RA(nn.Module):
                 ]
 
 
-def get_cnn_model(model_name='resnet18', output_num=None, pretrained=True, freeze_bn=False, dropout_p=0, **kwargs):
+def get_pretrained_cnn(model_name='resnet18', output_num=None, pretrained=True, freeze_bn=False, dropout_p=0, **kwargs):
 
     if 'efficientnet' in model_name:
         model = EfficientNet.from_pretrained(

@@ -6,7 +6,6 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 import joblib
-import pdb
 from sklearn.model_selection import StratifiedKFold
 
 import torch
@@ -179,8 +178,10 @@ def main():
     args = parse_args()
 
     if args.name is None:
-        args.name = '%s_%s' % (args.arch, datetime.now().strftime('%m%d%H%M'))
-
+        if args.is_baseline:
+            args.name = '%s_%s_%s' % ('baseline', args.arch, datetime.now().strftime('%m%d%H%M'))
+        else:
+            args.name = '%s_%s_%s' % ('arcnet', args.arch, datetime.now().strftime('%m%d%H%M'))
     if not os.path.exists('models/%s' % args.name):
         os.makedirs('models/%s' % args.name)
 
@@ -228,7 +229,6 @@ def main():
     img_paths = []
     labels = []
     for fold, (train_idx, val_idx) in enumerate(skf.split(img_path, img_labels)):
-        # pdb.set_trace()
         img_paths.append((img_path[train_idx], img_path[val_idx]))
         labels.append((img_labels[train_idx], img_labels[val_idx]))
 
@@ -260,7 +260,6 @@ def main():
     ])
 
     val_transform = transforms.Compose([
-        # transforms.Resize((args.img_size, args.input_size)),
         transforms.Resize((args.input_size, args.input_size)),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),

@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 import torch.nn as nn
-import torch.nn.functional as F
 from torchvision import models
 import pretrainedmodels
 from efficientnet_pytorch import EfficientNet
