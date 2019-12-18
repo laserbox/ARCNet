@@ -16,8 +16,6 @@ class RA(nn.Module):
         self.cnn_model_name = cnn_model_name
         self.cnn, feature_dim, reduction = get_pretrained_cnn(
             cnn_model_name, class_num, pretrain)
-        for p in self.cnn.parameters():
-            p.requires_grad = False
 
         self.feature_dim = feature_dim
         self.hidden_size = hidden_size

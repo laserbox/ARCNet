@@ -1,6 +1,5 @@
 import os
 import argparse
-from datetime import datetime
 
 import numpy as np
 from tqdm import tqdm
@@ -179,9 +178,9 @@ def main():
 
     if args.name is None:
         if args.is_baseline:
-            args.name = '%s_%s_%s' % ('baseline', args.arch, datetime.now().strftime('%m%d%H%M'))
+            args.name = '%s_%s' % ('baseline', args.arch)
         else:
-            args.name = '%s_%s_%s' % ('arcnet', args.arch, datetime.now().strftime('%m%d%H%M'))
+            args.name = '%s_%s' % ('arcnet', args.arch)
     if not os.path.exists('models/%s' % args.name):
         os.makedirs('models/%s' % args.name)
 
@@ -310,8 +309,21 @@ def main():
             model = get_model(model_name=args.arch, num_outputs=num_outputs,
                               freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
         else:
+            model_path = 'models/%s/model_%d.pth' % (
+                'baseline_' + args.arch, fold + 1)
+            if not os.path.exists(model_path):
+                print('%s is not exists' % model_path)
+                continue
             model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256,
                        layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
+            pretrained_dict = torch.load(model_path)
+            model_dict = model.cnn.state_dict()
+            pretrained_dict = {k: v for k,
+                               v in pretrained_dict.items() if k in model_dict}
+            model_dict.update(pretrained_dict)
+            model.cnn.load_state_dict(model_dict)
+            for p in model.cnn.parameters():
+                p.requires_grad = False
 
         device = torch.device('cuda')
         if torch.cuda.device_count() > 1:
@@ -390,7 +402,8 @@ def main():
                                      (args.name, fold+1), index=False)
 
             if val_ac_score > best_ac_score:
-                # torch.save(model.state_dict(), 'models/%s/model_%d.pth' % (args.name, fold+1))
+                torch.save(model.state_dict(), 'models/%s/model_%d.pth' %
+                           (args.name, fold+1))
                 best_loss = val_loss
                 best_ac_score = val_ac_score
                 best_epoch = epoch
