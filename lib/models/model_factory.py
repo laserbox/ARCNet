@@ -9,7 +9,7 @@ from efficientnet_pytorch import EfficientNet
 from lib.models.MobileNetV2 import mobilenet_v2
 
 
-def get_model(model_name='resnet18', num_outputs=None, pretrained=True,
+def get_model(model_name='resnet18', num_outputs=None, pretrained=False,
               freeze_bn=False, dropout_p=0, **kwargs):
 
     if 'efficientnet' in model_name:

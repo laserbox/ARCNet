@@ -63,6 +63,11 @@ def parse_args():
                         type=str2bool, help='nesterov')
     parser.add_argument('--gpus', default='2', type=str)
 
+    # lstm
+    parser.add_argument('--lstm_layers', default=3, type=int)
+    parser.add_argument('--lstm_hidden', default=256, type=int)
+    parser.add_argument('--lstm_recurrence', default=5, type=int)
+
     # preprocessing
     parser.add_argument('--scale_radius', default=True, type=str2bool)
     parser.add_argument('--normalize', default=False, type=str2bool)
@@ -220,8 +225,8 @@ def main():
         model = get_model(model_name=args.arch, num_outputs=num_outputs,
                           freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
     else:
-        model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256,
-                   layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
+        model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=args.lstm_hidden,
+                   layer_num=args.lstm_layers, recurrent_num=args.lstm_recurrence, class_num=num_outputs)
 
     skf = StratifiedKFold(n_splits=args.n_splits,
                           shuffle=True, random_state=41)
@@ -314,8 +319,8 @@ def main():
             if not os.path.exists(model_path):
                 print('%s is not exists' % model_path)
                 continue
-            model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256,
-                       layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
+            model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=args.lstm_hidden,
+                       layer_num=args.lstm_layers, recurrent_num=args.lstm_recurrence, class_num=num_outputs)
             pretrained_dict = torch.load(model_path)
             model_dict = model.cnn.state_dict()
             pretrained_dict = {k: v for k,
