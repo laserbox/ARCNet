@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 import joblib
-
+import pdb
 from sklearn.model_selection import StratifiedKFold
 
 import torch
@@ -23,6 +23,7 @@ from lib.losses import FocalLoss
 from lib.optimizers import RAdam
 from lib.datapath import img_path_generator
 from lib.models.ra import RA
+from lib.models.model_factory import get_model
 
 
 def parse_args():
@@ -30,7 +31,7 @@ def parse_args():
 
     parser.add_argument('--name', default=None,
                         help='model name: (default: arch+timestamp)')
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet34',
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
                         help='model architecture: ' + ' (default: resnet34)')
     parser.add_argument('--freeze_bn', default=True, type=str2bool)
     parser.add_argument('--dropout_p', default=0, type=float)
@@ -62,13 +63,13 @@ def parse_args():
                         type=float, help='weight decay')
     parser.add_argument('--nesterov', default=False,
                         type=str2bool, help='nesterov')
-    parser.add_argument('--gpus', default='0', type=str)
+    parser.add_argument('--gpus', default='2', type=str)
 
     # preprocessing
     parser.add_argument('--scale_radius', default=True, type=str2bool)
     parser.add_argument('--normalize', default=False, type=str2bool)
     parser.add_argument('--padding', default=False, type=str2bool)
-    parser.add_argument('--remove', default=False, type=str2bool)
+    parser.add_argument('--is_baseline', default=False, type=str2bool)
 
     # data augmentation
     parser.add_argument('--rotate', default=True, type=str2bool)
@@ -202,7 +203,6 @@ def main():
         criterion = FocalLoss().cuda()
     elif args.loss == 'MSELoss':
         criterion = nn.MSELoss().cuda()
-
     else:
         raise NotImplementedError
 
@@ -211,11 +211,27 @@ def main():
     # switch to deterministic model, more stable
     cudnn.deterministic = True
 
-    model = RA(cnn_model_name=args.arch)
+    
+    img_path, img_labels, num_outputs = img_path_generator(dataset=args.train_dataset)
+    if args.pred_type == 'regression':
+        num_outputs = 1
+    
+    if args.is_baseline:
+        model = get_model(model_name=args.arch, num_outputs=num_outputs, freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
+    else:
+        model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256, layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
+
+    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=41)
+    img_paths = []
+    labels = []
+    for fold, (train_idx, val_idx) in enumerate(skf.split(img_path, img_labels)):
+        # pdb.set_trace()
+        img_paths.append((img_path[train_idx], img_path[val_idx]))
+        labels.append((img_labels[train_idx], img_labels[val_idx]))
 
     train_transform = []
     train_transform = transforms.Compose([
-        transforms.Resize((args.img_size, args.img_size)),
+        transforms.Resize((args.input_size, args.input_size)),
         transforms.RandomAffine(
             degrees=(args.rotate_min, args.rotate_max) if args.rotate else 0,
             translate=(args.translate_min,
@@ -223,7 +239,7 @@ def main():
             scale=(args.rescale_min, args.rescale_max) if args.rescale else None,
             shear=(args.shear_min, args.shear_max) if args.shear else None,
         ),
-        transforms.CenterCrop(args.input_size),
+        # transforms.CenterCrop(args.input_size),
         transforms.RandomHorizontalFlip(p=0.5 if args.flip else 0),
         transforms.RandomVerticalFlip(p=0.5 if args.flip else 0),
         transforms.ColorJitter(
@@ -246,16 +262,6 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
-
-    ucm_img_path, ucm_labels, num_outputs = img_path_generator(dataset=args.train_dataset)
-    if args.pred_type == 'regression':
-        num_outputs = 1
-    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=41)
-    img_paths = []
-    labels = []
-    for fold, (train_idx, val_idx) in enumerate(skf.split(ucm_img_path, ucm_labels)):
-        img_paths.append((ucm_img_path[train_idx], ucm_img_path[val_idx]))
-        labels.append((ucm_labels[train_idx], ucm_labels[val_idx]))
 
     folds = []
     best_losses = []
@@ -298,7 +304,10 @@ def main():
             num_workers=4)
 
         # create model
-        model = RA(cnn_model_name=args.arch)
+        if args.is_baseline:
+            model = get_model(model_name=args.arch, num_outputs=num_outputs, freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
+        else:
+            model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=256, layer_num=3, recurrent_num=5, class_num=num_outputs, pretrain=True)
 
         device = torch.device('cuda')
         if torch.cuda.device_count() > 1:
@@ -321,10 +330,10 @@ def main():
             optimizer = RAdam(
                 filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
         elif args.optimizer == 'SGD':
-            # optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr,
-            #                       momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
-            optimizer = optim.SGD(model.get_config_optim(args.lr, args.lr, args.lr), lr=args.lr,
+            optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr,
                                   momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
+            # optimizer = optim.SGD(model.get_config_optim(args.lr, args.lr, args.lr), lr=args.lr,
+            #                       momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
 
         if args.scheduler == 'CosineAnnealingLR':
             scheduler = lr_scheduler.CosineAnnealingLR(
@@ -377,8 +386,7 @@ def main():
                                      (args.name, fold+1), index=False)
 
             if val_ac_score > best_ac_score:
-                torch.save(model.state_dict(), 'models/%s/model_%d.pth' %
-                           (args.name, fold+1))
+                # torch.save(model.state_dict(), 'models/%s/model_%d.pth' % (args.name, fold+1))
                 best_loss = val_loss
                 best_ac_score = val_ac_score
                 best_epoch = epoch
