@@ -1,2 +1,5 @@
 .vscode/settings.json
 .DS_Store
+lib/.DS_Store
+lib/models/.DS_Store
+utils/.DS_Store
