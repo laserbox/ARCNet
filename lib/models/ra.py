@@ -30,7 +30,7 @@ class RA(nn.Module):
         self.fc = nn.Linear(self.hidden_size, self.class_num, bias=False)
 
         self.tanh = nn.Tanh()
-        self.drop = nn.Dropout(p=0.6)
+        self.drop = nn.Dropout(p=0.5)
 
     def single_lstm(self, input):
         # pdb.set_trace()
@@ -39,14 +39,14 @@ class RA(nn.Module):
 
         _, (self.h, self.c) = self.lstm(input, (self.h, self.c))
 
-        output = self.tanh(self.h[-1])
-        output = self.drop(output)
+        # output = self.tanh(self.h[-1])
+        output = self.drop(self.h[-1])
 
         self.m = self.att(output)
-        self.m = F.softmax(self.m)
+        self.m = F.softmax(self.m, dim=1)
 
         output = self.fc(output)
-        output = F.softmax(output)
+        output = F.softmax(output, dim=1)
 
         return output
 
@@ -62,13 +62,14 @@ class RA(nn.Module):
             self.layer_num, cnn_x.size(0), self.hidden_size)).cuda()
         self.c = Variable(torch.zeros(
             self.layer_num, cnn_x.size(0), self.hidden_size)).cuda()
-        self.m = Variable(torch.ones(cnn_x.size(0), self.mask_size)/self.mask_size).cuda()
+        self.m = Variable(torch.ones(cnn_x.size(0), self.mask_size)).cuda()
+        self.m = F.softmax(self.m, dim=1)
 
         cnn_x = cnn_x.view(cnn_x.size(0), cnn_x.size(1), -1)
 
         o = 0
         for _ in range(self.recurrent_num):
-            o = self.single_lstm(cnn_x)
+            o += self.single_lstm(cnn_x)
         return o
 
     def get_config_optim(self, lr_cnn, lr_lstm):

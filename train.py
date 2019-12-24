@@ -309,8 +309,8 @@ def main():
                                v in pretrained_dict.items() if k in model_dict}
             model_dict.update(pretrained_dict)
             model.cnn.load_state_dict(model_dict)
-            for p in model.cnn.parameters():
-                p.requires_grad = False
+            # for p in model.cnn.parameters():
+            #     p.requires_grad = False
 
         device = torch.device('cuda')
         if torch.cuda.device_count() > 1:
