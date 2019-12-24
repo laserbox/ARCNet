@@ -15,9 +15,9 @@ import torch.backends.cudnn as cudnn
 from torchvision import transforms
 
 from lib.dataset import Dataset
-from lib.utils import AverageMeter, str2bool, RandomErase
+from lib.utils.utils import AverageMeter, str2bool, RandomErase
 from lib.metrics import compute_accuracy
-from lib.losses import FocalLoss
+from lib.losses import FocalLoss, LabelSmoothingLoss
 from lib.optimizers import RAdam
 from lib.datapath import img_path_generator
 from lib.models.RA import RA
@@ -33,8 +33,8 @@ def parse_args():
                         help='model architecture: ' + ' (default: resnet34)')
     parser.add_argument('--freeze_bn', default=True, type=str2bool)
     parser.add_argument('--dropout_p', default=0, type=float)
-    parser.add_argument('--loss', default='CrossEntropyLoss',
-                        choices=['CrossEntropyLoss', 'FocalLoss', 'MSELoss'])
+    parser.add_argument('--loss', default='LabelSmoothingLoss',
+                        choices=['CrossEntropyLoss', 'FocalLoss', 'MSELoss', 'LabelSmoothingLoss'])
     parser.add_argument('--reg_coef', default=1.0, type=float)
     parser.add_argument('--cls_coef', default=0.1, type=float)
     parser.add_argument('--epochs', default=30, type=int,
@@ -158,7 +158,7 @@ def validate(args, val_loader, model, criterion):
             input = input.cuda()
             target = target.cuda()
 
-            output= model(input)
+            output = model(input)
 
             if args.pred_type == 'classification':
                 loss = criterion(output, target)
@@ -202,15 +202,6 @@ def main():
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
-    if args.loss == 'CrossEntropyLoss':
-        criterion = nn.CrossEntropyLoss().cuda()
-    elif args.loss == 'FocalLoss':
-        criterion = FocalLoss().cuda()
-    elif args.loss == 'MSELoss':
-        criterion = nn.MSELoss().cuda()
-    else:
-        raise NotImplementedError
-
     # switch to benchmark model, a little forward results fluctuation, a little fast training
     cudnn.benchmark = True
     # switch to deterministic model, more stable
@@ -233,8 +224,8 @@ def main():
     train_transform = transforms.Compose([
         transforms.Resize((args.img_size, args.img_size)),
         transforms.RandomCrop(args.input_size),
-        transforms.RandomHorizontalFlip(p=0.5 if args.flip else 0),
-        transforms.RandomVerticalFlip(p=0.5 if args.flip else 0),
+        transforms.RandomHorizontalFlip(),
+        # transforms.RandomVerticalFlip(),
         RandomErase(
             prob=args.random_erase_prob if args.random_erase else 0,
             sl=args.random_erase_sl,
@@ -250,6 +241,17 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
+
+    if args.loss == 'CrossEntropyLoss':
+        criterion = nn.CrossEntropyLoss().cuda()
+    elif args.loss == 'FocalLoss':
+        criterion = FocalLoss().cuda()
+    elif args.loss == 'MSELoss':
+        criterion = nn.MSELoss().cuda()
+    elif args.loss == 'LabelSmoothingLoss':
+        criterion = LabelSmoothingLoss(classes=num_outputs, smoothing=0.8).cuda()
+    else:
+        raise NotImplementedError
 
     folds = []
     best_losses = []
