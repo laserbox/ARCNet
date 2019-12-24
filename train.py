@@ -65,8 +65,8 @@ def parse_args():
 
     # lstm
     parser.add_argument('--lstm_layers', default=3, type=int)
-    parser.add_argument('--lstm_hidden', default=256, type=int)
-    parser.add_argument('--lstm_recurrence', default=5, type=int)
+    parser.add_argument('--lstm_hidden', default=512, type=int)
+    parser.add_argument('--lstm_recurrence', default=10, type=int)
 
     # preprocessing
     parser.add_argument('--scale_radius', default=True, type=str2bool)
@@ -102,8 +102,6 @@ def parse_args():
                         choices=['ucm', 'whu', 'opt', 'nwpu', 'aid'])
     parser.add_argument('--cv', default=True, type=str2bool)
     parser.add_argument('--n_splits', default=5, type=int)
-    parser.add_argument('--remove_duplicate', default=False, type=str2bool)
-    parser.add_argument('--class_aware', default=False, type=str2bool)
 
     parser.add_argument('--pretrained_model')
 
