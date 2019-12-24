@@ -41,10 +41,10 @@ def parse_args():
                         metavar='N', help='number of total epochs to run')
     parser.add_argument('-b', '--batch_size', default=32, type=int,
                         metavar='N', help='mini-batch size (default: 32)')
-    parser.add_argument('--img_size', default=288, type=int,
-                        help='input image size (default: 288)')
-    parser.add_argument('--input_size', default=256, type=int,
+    parser.add_argument('--img_size', default=256, type=int,
                         help='input image size (default: 256)')
+    parser.add_argument('--input_size', default=224, type=int,
+                        help='input image size (default: 224)')
     parser.add_argument('--optimizer', default='SGD')
     parser.add_argument('--pred_type', default='classification',
                         choices=['classification', 'regression'])
@@ -158,7 +158,7 @@ def validate(args, val_loader, model, criterion):
             input = input.cuda()
             target = target.cuda()
 
-            output = model(input)
+            output= model(input)
 
             if args.pred_type == 'classification':
                 loss = criterion(output, target)
@@ -174,7 +174,7 @@ def validate(args, val_loader, model, criterion):
 
             losses.update(loss.item(), input.size(0))
             ac_scores.update(ac_score, input.size(0))
-
+        # print(m)
     return losses.avg, ac_scores.avg
 
 
@@ -212,21 +212,14 @@ def main():
         raise NotImplementedError
 
     # switch to benchmark model, a little forward results fluctuation, a little fast training
-    # cudnn.benchmark = True
+    cudnn.benchmark = True
     # switch to deterministic model, more stable
-    cudnn.deterministic = True
+    # cudnn.deterministic = True
 
     img_path, img_labels, num_outputs = img_path_generator(
         dataset=args.train_dataset)
     if args.pred_type == 'regression':
         num_outputs = 1
-
-    if args.is_baseline:
-        model = get_model(model_name=args.arch, num_outputs=num_outputs,
-                          freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
-    else:
-        model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=args.lstm_hidden,
-                   layer_num=args.lstm_layers, recurrent_num=args.lstm_recurrence, class_num=num_outputs)
 
     skf = StratifiedKFold(n_splits=args.n_splits,
                           shuffle=True, random_state=41)
@@ -238,22 +231,10 @@ def main():
 
     train_transform = []
     train_transform = transforms.Compose([
-        transforms.Resize((args.input_size, args.input_size)),
-        transforms.RandomAffine(
-            degrees=(args.rotate_min, args.rotate_max) if args.rotate else 0,
-            translate=(args.translate_min,
-                       args.translate_max) if args.translate else None,
-            scale=(args.rescale_min, args.rescale_max) if args.rescale else None,
-            shear=(args.shear_min, args.shear_max) if args.shear else None,
-        ),
-        # transforms.CenterCrop(args.input_size),
+        transforms.Resize((args.img_size, args.img_size)),
+        transforms.RandomCrop(args.input_size),
         transforms.RandomHorizontalFlip(p=0.5 if args.flip else 0),
         transforms.RandomVerticalFlip(p=0.5 if args.flip else 0),
-        transforms.ColorJitter(
-            brightness=0,
-            contrast=args.contrast,
-            saturation=0,
-            hue=0),
         RandomErase(
             prob=args.random_erase_prob if args.random_erase else 0,
             sl=args.random_erase_sl,
@@ -264,7 +245,8 @@ def main():
     ])
 
     val_transform = transforms.Compose([
-        transforms.Resize((args.input_size, args.input_size)),
+        transforms.Resize((args.img_size, args.img_size)),
+        transforms.CenterCrop(args.input_size),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
@@ -277,14 +259,14 @@ def main():
     for fold, ((train_img_paths, val_img_paths), (train_labels, val_labels)) in enumerate(zip(img_paths, labels)):
         print('Fold [%d/%d]' % (fold+1, len(img_paths)))
 
-        if os.path.exists('models/%s/model_%d.pth' % (args.name, fold+1)):
-            log = pd.read_csv('models/%s/log_%d.csv' % (args.name, fold+1))
-            best_loss, best_ac_score = log.loc[log['val_loss'].values.argmin(
-            ), ['val_loss', 'val_score', 'val_ac_score']].values
-            folds.append(str(fold + 1))
-            best_losses.append(best_loss)
-            best_ac_scores.append(best_ac_score)
-            continue
+        # if os.path.exists('models/%s/model_%d.pth' % (args.name, fold+1)):
+        #     log = pd.read_csv('models/%s/log_%d.csv' % (args.name, fold+1))
+        #     best_loss, best_ac_score = log.loc[log['val_loss'].values.argmin(
+        #     ), ['val_loss', 'val_score', 'val_ac_score']].values
+        #     folds.append(str(fold + 1))
+        #     best_losses.append(best_loss)
+        #     best_ac_scores.append(best_ac_score)
+        #     continue
 
         # train
         train_set = Dataset(
@@ -430,7 +412,7 @@ def main():
         })
 
         print(results)
-
+        results.to_csv('models/%s/results.csv' % args.name, index=False)
         torch.cuda.empty_cache()
 
         if not args.cv:

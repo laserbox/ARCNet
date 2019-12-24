@@ -10,7 +10,7 @@ from lib.models.MobileNetV2 import mobilenet_v2
 
 
 class RA(nn.Module):
-    def __init__(self, cnn_model_name='resnet18', input_size=256, hidden_size=256, layer_num=3, recurrent_num=5, class_num=5, pretrain=True):
+    def __init__(self, cnn_model_name='resnet18', input_size=224, hidden_size=256, layer_num=3, recurrent_num=5, class_num=5, pretrain=False):
         super(RA, self).__init__()
 
         self.cnn_model_name = cnn_model_name
@@ -60,13 +60,13 @@ class RA(nn.Module):
             self.layer_num, cnn_x.size(0), self.hidden_size)).cuda()
         self.c = Variable(torch.zeros(
             self.layer_num, cnn_x.size(0), self.hidden_size)).cuda()
-        self.m = Variable(torch.ones(cnn_x.size(0), self.mask_size)).cuda()
+        self.m = Variable(torch.ones(cnn_x.size(0), self.mask_size)/self.mask_size).cuda()
 
         cnn_x = cnn_x.view(cnn_x.size(0), cnn_x.size(1), -1)
 
         o = 0
         for _ in range(self.recurrent_num):
-            o += self.single_lstm(cnn_x)
+            o = self.single_lstm(cnn_x)
         return o
 
     def get_config_optim(self, lr_cnn, lr_lstm):
@@ -88,10 +88,12 @@ def get_pretrained_cnn(model_name='resnet18', output_num=None, pretrained=True, 
         model = models.__dict__[model_name](
             num_classes=1000, pretrained=pretrained)
         channel = model.classifier.in_features
+        model.classifier = nn.Linear(channel, output_num)
 
     elif 'mobilenet' in model_name:
         model = mobilenet_v2(pretrained=pretrained)
         channel = model.classifier.in_features
+        model.classifier = nn.Linear(channel, output_num)
 
     else:
         pretrained = 'imagenet' if pretrained else None
@@ -103,8 +105,18 @@ def get_pretrained_cnn(model_name='resnet18', output_num=None, pretrained=True, 
             model.last_linear = nn.Conv2d(
                 channel, output_num, kernel_size=1, bias=True)
         else:
+            if 'resnet' in model_name:
+                model.avgpool = nn.AdaptiveAvgPool2d(1)
+            else:
+                model.avg_pool = nn.AdaptiveAvgPool2d(1)
             channel = model.last_linear.in_features
-
+            if dropout_p == 0:
+                model.last_linear = nn.Linear(channel, output_num)
+            else:
+                model.last_linear = nn.Sequential(
+                    nn.Dropout(p=dropout_p),
+                    nn.Linear(channel, output_num),
+                )
     if 'resnet' in model_name or 'se_resnext' in model_name:
         reduction = 32
     elif 'vgg' in model_name:
