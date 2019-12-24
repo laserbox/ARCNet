@@ -30,7 +30,7 @@ class RA(nn.Module):
         self.fc = nn.Linear(self.hidden_size, self.class_num, bias=False)
 
         self.tanh = nn.Tanh()
-        self.drop = nn.Dropout()
+        self.drop = nn.Dropout(p=0.6)
 
     def single_lstm(self, input):
         # pdb.set_trace()
@@ -40,11 +40,13 @@ class RA(nn.Module):
         _, (self.h, self.c) = self.lstm(input, (self.h, self.c))
 
         output = self.tanh(self.h[-1])
+        output = self.drop(output)
+
+        self.m = self.att(output)
+        self.m = F.softmax(self.m)
+
         output = self.fc(output)
         output = F.softmax(output)
-
-        self.m = self.att(self.h[-1])
-        self.m = F.softmax(self.m)
 
         return output
 

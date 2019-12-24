@@ -91,7 +91,7 @@ def parse_args():
     parser.add_argument('--contrast', default=True, type=str2bool)
     parser.add_argument('--contrast_min', default=0.9, type=float)
     parser.add_argument('--contrast_max', default=1.1, type=float)
-    parser.add_argument('--random_erase', default=False, type=str2bool)
+    parser.add_argument('--random_erase', default=True, type=str2bool)
     parser.add_argument('--random_erase_prob', default=0.5, type=float)
     parser.add_argument('--random_erase_sl', default=0.02, type=float)
     parser.add_argument('--random_erase_sh', default=0.4, type=float)
@@ -389,8 +389,9 @@ def main():
                                      (args.name, fold+1), index=False)
 
             if val_ac_score > best_ac_score:
-                torch.save(model.state_dict(), 'models/%s/model_%d.pth' %
-                           (args.name, fold+1))
+                if args.is_baseline:
+                    torch.save(model.state_dict(), 'models/%s/model_%d.pth' %
+                               (args.name, fold+1))
                 best_loss = val_loss
                 best_ac_score = val_ac_score
                 best_epoch = epoch
