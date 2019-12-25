@@ -39,8 +39,8 @@ class RA(nn.Module):
 
         _, (self.h, self.c) = self.lstm(input, (self.h, self.c))
 
-        # output = self.tanh(self.h[-1])
-        output = self.drop(self.h[-1])
+        output = self.tanh(self.h[-1])
+        output = self.drop(output)
 
         self.m = self.att(output)
         self.m = F.softmax(self.m, dim=1)

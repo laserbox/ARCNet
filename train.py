@@ -33,7 +33,7 @@ def parse_args():
                         help='model architecture: ' + ' (default: resnet34)')
     parser.add_argument('--freeze_bn', default=True, type=str2bool)
     parser.add_argument('--dropout_p', default=0, type=float)
-    parser.add_argument('--loss', default='LabelSmoothingLoss',
+    parser.add_argument('--loss', default='CrossEntropyLoss',
                         choices=['CrossEntropyLoss', 'FocalLoss', 'MSELoss', 'LabelSmoothingLoss'])
     parser.add_argument('--reg_coef', default=1.0, type=float)
     parser.add_argument('--cls_coef', default=0.1, type=float)
@@ -66,7 +66,7 @@ def parse_args():
     # lstm
     parser.add_argument('--lstm_layers', default=3, type=int)
     parser.add_argument('--lstm_hidden', default=256, type=int)
-    parser.add_argument('--lstm_recurrence', default=20, type=int)
+    parser.add_argument('--lstm_recurrence', default=10, type=int)
 
     # preprocessing
     parser.add_argument('--scale_radius', default=True, type=str2bool)
@@ -309,8 +309,8 @@ def main():
                                v in pretrained_dict.items() if k in model_dict}
             model_dict.update(pretrained_dict)
             model.cnn.load_state_dict(model_dict)
-            for p in model.cnn.parameters():
-                p.requires_grad = False
+            # for p in model.cnn.parameters():
+            #     p.requires_grad = False
 
         device = torch.device('cuda')
         if torch.cuda.device_count() > 1:
