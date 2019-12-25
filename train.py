@@ -65,8 +65,8 @@ def parse_args():
 
     # lstm
     parser.add_argument('--lstm_layers', default=3, type=int)
-    parser.add_argument('--lstm_hidden', default=512, type=int)
-    parser.add_argument('--lstm_recurrence', default=10, type=int)
+    parser.add_argument('--lstm_hidden', default=256, type=int)
+    parser.add_argument('--lstm_recurrence', default=20, type=int)
 
     # preprocessing
     parser.add_argument('--scale_radius', default=True, type=str2bool)
@@ -309,8 +309,8 @@ def main():
                                v in pretrained_dict.items() if k in model_dict}
             model_dict.update(pretrained_dict)
             model.cnn.load_state_dict(model_dict)
-            # for p in model.cnn.parameters():
-            #     p.requires_grad = False
+            for p in model.cnn.parameters():
+                p.requires_grad = False
 
         device = torch.device('cuda')
         if torch.cuda.device_count() > 1:
