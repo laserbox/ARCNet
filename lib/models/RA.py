@@ -54,7 +54,7 @@ class RA(nn.Module):
         if 'efficient' in self.cnn_model_name:
             cnn_x = self.cnn.extract_features(input)  # 1,c,7,7
         elif 'vgg' in self.cnn_model_name:
-            cnn_x = self.cnn._features(cnn_x)  # 1,512,7,7
+            cnn_x = self.cnn._features(input)  # 1,512,7,7
         else:
             cnn_x = self.cnn.features(input)  # 1,c,7,7
 
