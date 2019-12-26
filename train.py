@@ -221,7 +221,7 @@ def main():
     train_transform = []
     train_transform = transforms.Compose([
         transforms.Resize((args.img_size, args.img_size)),
-        transforms.RandomCrop(args.input_size),
+        transforms.RandomCrop(args.input_size, padding=4),
         transforms.RandomHorizontalFlip(),
         # transforms.RandomVerticalFlip(),
         RandomErase(
