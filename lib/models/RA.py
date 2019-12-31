@@ -10,7 +10,7 @@ from lib.models.MobileNetV2 import mobilenet_v2
 
 
 class RA(nn.Module):
-    def __init__(self, cnn_model_name='resnet18', input_size=224, hidden_size=256, layer_num=3, recurrent_num=5, class_num=5, pretrain=False):
+    def __init__(self, cnn_model_name='resnet18', input_size=224, hidden_size=256, layer_num=3, recurrent_num=5, class_num=5, dropout_p=0.5, pretrain=False):
         super(RA, self).__init__()
 
         self.cnn_model_name = cnn_model_name
@@ -26,11 +26,16 @@ class RA(nn.Module):
 
         self.lstm = nn.LSTM(self.feature_dim, self.hidden_size,
                             self.layer_num, batch_first=True)
-        self.att = nn.Linear(self.hidden_size, self.mask_size, bias=False)
-        self.fc = nn.Linear(self.hidden_size, self.class_num, bias=False)
+        self.att = nn.Sequential(
+            nn.Dropout(p=dropout_p),
+            nn.Linear(self.hidden_size, self.mask_size, bias=False),
+            )
+        self.fc = nn.Sequential(
+            nn.Dropout(p=dropout_p),
+            nn.Linear(self.hidden_size, self.class_num, bias=False),
+            )
 
         self.tanh = nn.Tanh()
-        self.drop = nn.Dropout(p=0.5)
 
     def single_lstm(self, input):
         # pdb.set_trace()
@@ -40,13 +45,13 @@ class RA(nn.Module):
         _, (self.h, self.c) = self.lstm(input, (self.h, self.c))
 
         output = self.tanh(self.h[-1])
-        output = self.drop(output)
 
-        self.m = self.att(output)
+        self.m = self.att(self.h[-1])
         self.m = F.softmax(self.m, dim=1)
 
         output = self.fc(output)
-        output = F.softmax(output, dim=1)
+
+        # output = F.softmax(output, dim=1)
 
         return output
 

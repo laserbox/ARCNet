@@ -22,6 +22,7 @@ from lib.optimizers import RAdam
 from lib.datapath import img_path_generator
 from lib.models.RA import RA
 from lib.models.model_factory import get_model
+from lib.models.gcn import SoftLabelGCN
 
 
 def parse_args():
@@ -50,18 +51,19 @@ def parse_args():
                         choices=['classification', 'regression'])
     parser.add_argument('--scheduler', default='CosineAnnealingLR',
                         choices=['CosineAnnealingLR', 'ReduceLROnPlateau'])
-    parser.add_argument('--lr', '--learning-rate', default=1e-3,
+    parser.add_argument('--lr', '--learning_rate', default=1e-3,
                         type=float, metavar='LR', help='initial learning rate')
     parser.add_argument('--min_lr', default=1e-5,
                         type=float, help='minimum learning rate')
     parser.add_argument('--factor', default=0.5, type=float)
     parser.add_argument('--patience', default=5, type=int)
     parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
-    parser.add_argument('--weight-decay', default=1e-4,
+    parser.add_argument('--weight_decay', default=1e-4,
                         type=float, help='weight decay')
     parser.add_argument('--nesterov', default=False,
                         type=str2bool, help='nesterov')
     parser.add_argument('--gpus', default='2', type=str)
+    parser.add_argument('--mode', default='baseline', choices=['baseline', 'arcnet', 'gcn'])
 
     # lstm
     parser.add_argument('--lstm_layers', default=3, type=int)
@@ -72,7 +74,6 @@ def parse_args():
     parser.add_argument('--scale_radius', default=True, type=str2bool)
     parser.add_argument('--normalize', default=False, type=str2bool)
     parser.add_argument('--padding', default=False, type=str2bool)
-    parser.add_argument('--is_baseline', default=False, type=str2bool)
 
     # data augmentation
     parser.add_argument('--rotate', default=True, type=str2bool)
@@ -121,6 +122,13 @@ def train(args, train_loader, model, criterion, optimizer, epoch):
         target = target.cuda()
 
         output = model(input)
+        if args.mode == 'baseline':
+            output = output
+        elif args.mode == 'gcn':
+            output, adj = output
+        else:
+            output = output
+
         if args.pred_type == 'classification':
             loss = criterion(output, target)
         elif args.pred_type == 'regression':
@@ -140,7 +148,8 @@ def train(args, train_loader, model, criterion, optimizer, epoch):
 
         losses.update(loss.item(), input.size(0))
         ac_scores.update(ac_score, input.size(0))
-
+    if args.mode == 'gcn':
+        print(torch.max(adj))
     return losses.avg, ac_scores.avg
 
 
@@ -157,6 +166,12 @@ def validate(args, val_loader, model, criterion):
             target = target.cuda()
 
             output = model(input)
+            if args.mode == 'baseline':
+                output = output
+            elif args.mode == 'gcn':
+                output, adj = output
+            else:
+                output = output
 
             if args.pred_type == 'classification':
                 loss = criterion(output, target)
@@ -172,7 +187,7 @@ def validate(args, val_loader, model, criterion):
 
             losses.update(loss.item(), input.size(0))
             ac_scores.update(ac_score, input.size(0))
-        # print(m)
+
     return losses.avg, ac_scores.avg
 
 
@@ -180,10 +195,7 @@ def main():
     args = parse_args()
 
     if args.name is None:
-        if args.is_baseline:
-            args.name = '%s_%s' % ('baseline', args.arch)
-        else:
-            args.name = '%s_%s' % ('arcnet', args.arch)
+        args.name = '%s_%s' % (args.mode, args.arch)
     if not os.path.exists('models/%s' % args.name):
         os.makedirs('models/%s' % args.name)
 
@@ -211,7 +223,7 @@ def main():
         num_outputs = 1
 
     skf = StratifiedKFold(n_splits=args.n_splits,
-                          shuffle=True, random_state=41)
+                          shuffle=True, random_state=30)
     img_paths = []
     labels = []
     for fold, (train_idx, val_idx) in enumerate(skf.split(img_path, img_labels)):
@@ -292,9 +304,24 @@ def main():
             num_workers=4)
 
         # create model
-        if args.is_baseline:
+        if args.mode == 'baseline':
             model = get_model(model_name=args.arch, num_outputs=num_outputs,
                               freeze_bn=args.freeze_bn, dropout_p=args.dropout_p)
+        elif args.mode == 'gcn':
+            model_path = 'models/%s/model_%d.pth' % (
+                'baseline_' + args.arch, fold + 1)
+            if not os.path.exists(model_path):
+                print('%s is not exists' % model_path)
+                continue
+            model = SoftLabelGCN(cnn_model_name=args.arch, cnn_pretrained=False, num_outputs=num_outputs)
+            pretrained_dict = torch.load(model_path)
+            model_dict = model.cnn.state_dict()
+            pretrained_dict = {k: v for k,
+                               v in pretrained_dict.items() if k in model_dict}
+            model_dict.update(pretrained_dict)
+            model.cnn.load_state_dict(model_dict)
+            for p in model.cnn.parameters():
+                p.requires_grad = False
         else:
             model_path = 'models/%s/model_%d.pth' % (
                 'baseline_' + args.arch, fold + 1)
@@ -335,7 +362,7 @@ def main():
         elif args.optimizer == 'SGD':
             optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr,
                                   momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
-            # optimizer = optim.SGD(model.get_config_optim(args.lr, args.lr, args.lr), lr=args.lr,
+            # optimizer = optim.SGD(model.get_config_optim(args.lr, args.lr * 10, args.lr * 10), lr=args.lr,
             #                       momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
 
         if args.scheduler == 'CosineAnnealingLR':
@@ -389,7 +416,7 @@ def main():
                                      (args.name, fold+1), index=False)
 
             if val_ac_score > best_ac_score:
-                if args.is_baseline:
+                if args.mode == 'baseline':
                     torch.save(model.state_dict(), 'models/%s/model_%d.pth' %
                                (args.name, fold+1))
                 best_loss = val_loss
