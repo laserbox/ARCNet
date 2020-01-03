@@ -36,6 +36,7 @@ class RA(nn.Module):
             )
 
         self.tanh = nn.Tanh()
+        self.sigmoid = nn.Sigmoid()
 
     def single_lstm(self, input):
         # pdb.set_trace()
@@ -47,7 +48,8 @@ class RA(nn.Module):
         output = self.tanh(self.h[-1])
 
         self.m = self.att(self.h[-1])
-        self.m = F.softmax(self.m, dim=1)
+        # self.m = F.softmax(self.m, dim=1)
+        self.m = self.sigmoid(self.m)
 
         output = self.fc(output)
 
@@ -68,7 +70,7 @@ class RA(nn.Module):
         self.c = Variable(torch.zeros(
             self.layer_num, cnn_x.size(0), self.hidden_size)).cuda()
         self.m = Variable(torch.ones(cnn_x.size(0), self.mask_size)).cuda()
-        self.m = F.softmax(self.m, dim=1)
+        # self.m = F.softmax(self.m, dim=1)
 
         cnn_x = cnn_x.view(cnn_x.size(0), cnn_x.size(1), -1)
 
