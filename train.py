@@ -222,8 +222,7 @@ def main():
     if args.pred_type == 'regression':
         num_outputs = 1
 
-    skf = StratifiedKFold(n_splits=args.n_splits,
-                          shuffle=True, random_state=30)
+    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=0)
     img_paths = []
     labels = []
     for fold, (train_idx, val_idx) in enumerate(skf.split(img_path, img_labels)):
@@ -233,9 +232,20 @@ def main():
     train_transform = []
     train_transform = transforms.Compose([
         transforms.Resize((args.img_size, args.img_size)),
+        # transforms.RandomAffine(
+        #     degrees=(args.rotate_min, args.rotate_max) if args.rotate else 0,
+        #     translate=(args.translate_min, args.translate_max) if args.translate else None,
+        #     scale=(args.rescale_min, args.rescale_max) if args.rescale else None,
+        #     shear=(args.shear_min, args.shear_max) if args.shear else None,
+        # ),
         transforms.RandomCrop(args.input_size, padding=4),
         transforms.RandomHorizontalFlip(),
         # transforms.RandomVerticalFlip(),
+        # transforms.ColorJitter(
+        #     brightness=0,
+        #     contrast=args.contrast,
+        #     saturation=0,
+        #     hue=0),
         RandomErase(
             prob=args.random_erase_prob if args.random_erase else 0,
             sl=args.random_erase_sl,
@@ -323,19 +333,21 @@ def main():
             for p in model.cnn.parameters():
                 p.requires_grad = False
         else:
-            model_path = 'models/%s/model_%d.pth' % (
-                'baseline_' + args.arch, fold + 1)
-            if not os.path.exists(model_path):
-                print('%s is not exists' % model_path)
-                continue
             model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=args.lstm_hidden,
-                       layer_num=args.lstm_layers, recurrent_num=args.lstm_recurrence, class_num=num_outputs)
-            pretrained_dict = torch.load(model_path)
-            model_dict = model.cnn.state_dict()
-            pretrained_dict = {k: v for k,
-                               v in pretrained_dict.items() if k in model_dict}
-            model_dict.update(pretrained_dict)
-            model.cnn.load_state_dict(model_dict)
+                       layer_num=args.lstm_layers, recurrent_num=args.lstm_recurrence, class_num=num_outputs, pretrain=True)
+            # model_path = 'models/%s/model_%d.pth' % (
+            #     'baseline_' + args.arch, fold + 1)
+            # if not os.path.exists(model_path):
+            #     print('%s is not exists' % model_path)
+            #     continue
+            # model = RA(cnn_model_name=args.arch, input_size=args.input_size, hidden_size=args.lstm_hidden,
+            #            layer_num=args.lstm_layers, recurrent_num=args.lstm_recurrence, class_num=num_outputs)
+            # pretrained_dict = torch.load(model_path)
+            # model_dict = model.cnn.state_dict()
+            # pretrained_dict = {k: v for k,
+            #                    v in pretrained_dict.items() if k in model_dict}
+            # model_dict.update(pretrained_dict)
+            # model.cnn.load_state_dict(model_dict)
             # for p in model.cnn.parameters():
             #     p.requires_grad = False
 
