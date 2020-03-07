@@ -1,4 +1,23 @@
 # ARCNet
-The pytorch implementation of Scene Classification with Recurrent Attention of VHR Remote Sensing Images.
-
-The details will be updated later.
+- symbolic link the dataset to the datasets folder:
+    datasets
+        ucm
+            class_1
+            class_2
+            ...
+        whu
+            class_1
+            class_2
+            ...
+        aid
+            class_1
+            class_2
+            ...
+        opt
+            class_1
+            class_2
+            ...
+- train the baseline model
+    python baseline_train.py
+- train the arcnet model:
+    python train.py

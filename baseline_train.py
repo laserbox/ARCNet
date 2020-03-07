@@ -63,7 +63,7 @@ def parse_args():
     parser.add_argument('--nesterov', default=False,
                         type=str2bool, help='nesterov')
     parser.add_argument('--gpus', default='0', type=str)
-    parser.add_argument('--mode', default='arcnet', choices=['baseline', 'arcnet', 'gcn'])
+    parser.add_argument('--mode', default='baseline', choices=['baseline', 'arcnet', 'gcn'])
 
     # lstm
     parser.add_argument('--lstm_layers', default=3, type=int)
@@ -222,7 +222,7 @@ def main():
     if args.pred_type == 'regression':
         num_outputs = 1
 
-    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=0)
+    skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=30)
     img_paths = []
     labels = []
     for fold, (train_idx, val_idx) in enumerate(skf.split(img_path, img_labels)):
