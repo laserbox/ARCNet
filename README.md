@@ -23,11 +23,11 @@ datasets/
             class_2/
             ...
 ```
-## train the baseline model
+## first: train the baseline model, fine-tune the imagenet pretrained model on remote sensing dataset:
 ```
     python baseline_train.py
 ```
-## train the arcnet model:
+## second: train the arcnet model:
 ```
     python train.py
 ```
